@@ -110,6 +110,7 @@ plot(network)
 #remove rows ---no closed network
 data1 <- data1[-c(7,8),]
 
+# Just to check here - dataset is given as SMD treatment contrasts right?
 #network
 network <- mtc.network(data.re = data1)
 plot(network)
@@ -129,13 +130,22 @@ gelman.plot(mcmc2)
 gelman.diag(mcmc1)$mpsrf
 gelman.diag(mcmc2)$mpsrf
 
+# Based on the bgrplots (gelman.plot) I would use more adapt samples - can probs use fewer monitored iterations too
+mcmc3 <- mtc.run(model, n.adapt = 10000, n.iter = 20000, thin = 10)
+gelman.plot(mcmc3)
+gelman.diag(mcmc3)$mpsrf
+
 #Assessing inconsistency
 nodesplit <- mtc.nodesplit(network,
                            linearModel = "random",
-                           n.adapt = 5000,
-                           n.iter = 100000,
+                           n.adapt = 10000,
+                           n.iter = 20000,
                            thin = 10)
 
+# Some really quite substantial inconsistency here which would be cause for concern
+# Particularly for PT vs Exercise and PT vs Pharma where the direct and indirect suggest opposite effects
+# Probably due to lumping of treatments - assuming all pharma treatments to be equivalent seems like a very strong assumption to me
+# The same perhaps goes for other treatments in the network too, but I don't have clinical expertise to be able to know about this
 summary(nodesplit)
 plot(summary(nodesplit))
 
@@ -172,16 +182,57 @@ model.mr <- mtc.model(network.mr,
                       regressor = regressor)
 
 mcmc3 <- mtc.run(model.mr,
-                 n.adapt = 5000,
-                 n.iter = 100000,
+                 n.adapt = 10000,
+                 n.iter = 20000,
                  thin = 10)
 summary(mcmc3)
 ####The results for our covariate are reported under B####
 ####median=-0.150369 95%CrI (-1.9580, 1.7036) includes zero
 
 
+# So above you assume a shared regression effect (that the regressor has the same on all treatment effects)
+# We could relax this assumption by assuming an exchangeable regressor effect
+# The difference between these is akin to a fixed vs random effects meta-analysis, except that the fixed/random effects are
+#on the regressor effect and are labelled as shared/exchangeable.
+regressor <- list(coefficient = 'exchangeable',    #####I am not 100% clear about the specification
+                  variable = 'NM',
+                  control = 'Placebo')
+
+model.mr <- mtc.model(network.mr,
+                      type = "regression",
+                      regressor = regressor)
+
+mcmc4 <- mtc.run(model.mr,
+                 n.adapt = 10000,
+                 n.iter = 20000,
+                 thin = 10)
+summary(mcmc4)
+
+# The most complex model with fewest assumptions would be to assume that the regressor effects are "unrelated" between
+#different treatments. But there will probably not be enough information to assume this - you would need multiple studies
+#of each treatment comparison. A "middle ground" approach would be to assume a shared effect within different classes, which
+#allows for a bit more flexibility. So for treatments investigated in fewer studies you could assume it had the same class
+#as for another treamtent.
+# This is probably something that we need to sort ASAP actually - which classes are we going to assume the different treatments
+#fall into?
+
+
 ###Use DIC (deviance information criterion) to compare models.Lower DIC values mean better fit.
 
+summary(mcmc4)$DIC
 summary(mcmc3)$DIC
 summary(mcmc2)$DIC
 ###here almost the same results.Imho there is no influence of Baseline.pain in the short term.
+# You are correct in your conclusion for model 3 vs model 2....but if you look at mcmc4 there is a big reduction in DIC
+# Also there is a reduction in the between-study SD, suggesting that including this regressor explains some of the heterogeneity
+# This suggests that for some treatments it is an important regressor, whilst for others it may not be
+
+# If we look at the model results:
+summary(mcmc4)
+# beta[10] has a very negative coefficient
+# beta[2] does not have such a negative coefficient
+
+# So this suggests that for treatment 10 having a lower baseline score substantially reduces the treatment effect, whereas this
+#reduction is much less for treatment 2
+# Note that these coefficients will be "shunk" towards the mean exchangeable regressor effect (B)
+
